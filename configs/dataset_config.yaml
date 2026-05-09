@@ -1,0 +1,13 @@
+dataset:
+  name: "custom_dataset"
+  train_path: "datasets/train.csv"
+  test_path: "datasets/test.csv"
+  validation_path: "datasets/validation.csv"
+  target_column: "label"
+  test_size: 0.2
+  val_size: 0.1
+  random_state: 42
+  preprocessing:
+    normalize: true
+    standardize: true
+    handle_missing: "mean"
