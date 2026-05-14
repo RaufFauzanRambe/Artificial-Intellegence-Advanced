@@ -1,0 +1,65 @@
+# ---------------------------------------------------------------------------
+# Multi-stage Dockerfile for the AI Advanced Prediction Service
+# ---------------------------------------------------------------------------
+
+# ---- Stage 1: Base ----
+FROM python:3.11-slim AS base
+
+# Prevent Python from writing .pyc files and enable unbuffered stdout/stderr
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Install minimal system dependencies required by NumPy / PyTorch
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        libgomp1 \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory inside the container
+WORKDIR /app
+
+# ---- Stage 2: Builder ----
+FROM base AS builder
+
+COPY deployment/requirements.txt /app/requirements.txt
+
+# Install Python dependencies into a virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# ---- Stage 3: Runtime ----
+FROM base AS runtime
+
+# Copy the virtual environment from the builder stage
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy the entire project source into the container
+COPY . /app
+
+# Environment variables (defaults can be overridden at runtime)
+ENV AI_INPUT_DIM=128 \
+    AI_HIDDEN_DIMS=256,128,64 \
+    AI_OUTPUT_DIM=1 \
+    AI_DROPOUT=0.3 \
+    AI_CHECKPOINT_PATH=/app/checkpoints/best_model.pt \
+    PORT=8000
+
+# Expose the default API port
+EXPOSE 8000
+
+# Create a non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser appuser && \
+    mkdir -p /app/checkpoints && chown -R appuser:appuser /app
+USER appuser
+
+# Health check: hit the /health endpoint every 30 seconds
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["curl", "-f", "http://localhost:8000/health"]
+
+# Start the FastAPI server via uvicorn
+CMD ["uvicorn", "deployment.fastapi_server:app", "--host", "0.0.0.0", "--port", "8000"]
